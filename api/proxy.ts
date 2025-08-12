@@ -9,6 +9,8 @@ import { join } from "node:path";
 import waitOn from "wait-on";
 import waveConfig from "../app/wave.config.json" with { type: "json" };
 
+console.log("[proxy.ts]: Initializing...");
+
 const GO_APP_LOCATION = join(process.cwd(), waveConfig.Core.DistDir, "main");
 const GO_APP_HEALTH_CHECK_ENDPOINT = waveConfig.Watch.HealthcheckEndpoint;
 const GO_APP_STARTUP_TIMEOUT_IN_MS = 10_000; // 10s
@@ -20,8 +22,11 @@ let startPromise: Promise<number> | null = null;
 
 const requestTimings = new WeakMap<any, number>();
 
-if (process.env.NODE_ENV === "production") {
-	startGoApp().catch(console.error);
+try {
+	await startGoApp();
+} catch (error) {
+	console.error("Failed to start Go app:", error);
+	process.exit(1);
 }
 
 let proxyMiddleware: RequestHandler | null = null;
