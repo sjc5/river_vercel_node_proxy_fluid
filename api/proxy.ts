@@ -27,7 +27,6 @@ async function startGoApp(): Promise<number> {
 	}
 
 	isStarting = true;
-
 	startPromise = (async (): Promise<number> => {
 		try {
 			const startTime = performance.now();
@@ -103,23 +102,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 				target: `http://localhost:${port}`,
 				changeOrigin: true,
 				ws: true,
+				on: {
+					proxyReq: () => {
+						console.log(
+							`[Node proxy]: ${method} ${url} - proxying to Go app`,
+						);
+					},
+					proxyRes: (proxyRes) => {
+						const duration = performance.now() - startTime;
+						console.log(
+							`[Node proxy]: ${method} ${url} - ${proxyRes.statusCode} in ${duration.toFixed(2)}ms`,
+						);
+					},
+					error: (err) => {
+						const duration = performance.now() - startTime;
+						console.error(
+							`[Node proxy]: ${method} ${url} - error after ${duration.toFixed(2)}ms:`,
+							err.message,
+						);
+					},
+				},
 			});
 		}
 
 		return new Promise<void>((resolve, reject) => {
 			proxyMiddleware!(req as any, res as any, (err?: any) => {
 				if (err) {
-					const duration = performance.now() - startTime;
-					console.error(
-						`[Node proxy]: ${method} ${url} failed in ${duration.toFixed(2)}ms:`,
-						err.message,
-					);
 					reject(err);
 				} else {
-					const duration = performance.now() - startTime;
-					console.log(
-						`[Node proxy]: ${method} ${url} in ${duration.toFixed(2)}ms`,
-					);
 					resolve();
 				}
 			});
