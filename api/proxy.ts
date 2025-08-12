@@ -17,6 +17,8 @@ const GO_APP_LOCATION = join(process.cwd(), "./app/__dist/main");
 const GO_APP_STARTUP_TIMEOUT_IN_MS = 10_000; // 10s
 const GO_APP_HEALTH_CHECK_ENDPOINT = "/healthz";
 
+const requestTimings = new WeakMap<any, number>();
+
 async function startGoApp(): Promise<number> {
 	if (isStarting && startPromise) {
 		return startPromise;
@@ -90,9 +92,7 @@ async function startGoApp(): Promise<number> {
 let proxyMiddleware: RequestHandler | null = null;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-	const startTime = performance.now();
-	const method = req.method || "GET";
-	const url = req.url || "/";
+	requestTimings.set(req, performance.now());
 
 	try {
 		const port = await startGoApp();
@@ -103,23 +103,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 				changeOrigin: true,
 				ws: true,
 				on: {
-					proxyReq: () => {
-						console.log(
-							`[Node proxy]: ${method} ${url} - proxying to Go app`,
-						);
+					proxyRes: (proxyRes, req) => {
+						const startTime = requestTimings.get(req);
+						if (startTime) {
+							const duration = performance.now() - startTime;
+							console.log(
+								`[Node proxy]: ${req.method} ${req.url} - ${proxyRes.statusCode} in ${duration.toFixed(2)}ms`,
+							);
+							requestTimings.delete(req);
+						}
 					},
-					proxyRes: (proxyRes) => {
-						const duration = performance.now() - startTime;
-						console.log(
-							`[Node proxy]: ${method} ${url} - ${proxyRes.statusCode} in ${duration.toFixed(2)}ms`,
-						);
-					},
-					error: (err) => {
-						const duration = performance.now() - startTime;
-						console.error(
-							`[Node proxy]: ${method} ${url} - error after ${duration.toFixed(2)}ms:`,
-							err.message,
-						);
+					error: (err, req) => {
+						const startTime = requestTimings.get(req);
+						if (startTime) {
+							const duration = performance.now() - startTime;
+							console.error(
+								`[Node proxy]: ${req.method} ${req.url} - error after ${duration.toFixed(2)}ms:`,
+								err.message,
+							);
+							requestTimings.delete(req);
+						}
 					},
 				},
 			});
