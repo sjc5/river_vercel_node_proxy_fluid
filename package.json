@@ -12,7 +12,6 @@
 		"@types/node": "^24.2.1",
 		"@types/react": "^19.1.10",
 		"@types/react-dom": "^19.1.7",
-		"@types/wait-on": "^5.3.4",
 		"@vercel/node": "^5.3.11",
 		"@vitejs/plugin-react-swc": "^4.0.0",
 		"jotai": "^2.13.1",
@@ -22,11 +21,6 @@
 		"river.now": "^0.50.0",
 		"typescript": "^5.9.2",
 		"vite": "^7.1.1"
-	},
-	"dependencies": {
-		"get-port": "^7.1.0",
-		"http-proxy-middleware": "^3.0.5",
-		"wait-on": "^8.0.4"
 	},
 	"prettier": {
 		"useTabs": true,

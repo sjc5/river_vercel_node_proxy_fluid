@@ -1,12 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import getPort from "get-port";
-import {
-	createProxyMiddleware,
-	type RequestHandler,
-} from "http-proxy-middleware";
 import { ChildProcess, spawn } from "node:child_process";
+import http from "node:http";
 import { join } from "node:path";
-import waitOn from "wait-on";
 import waveConfig from "../app/wave.config.json" with { type: "json" };
 
 console.log("[Node Proxy]: Initializing function container...");
@@ -14,9 +9,37 @@ console.log("[Node Proxy]: Initializing function container...");
 const GO_APP_LOCATION = join(process.cwd(), waveConfig.Core.DistDir, "main");
 const GO_APP_HEALTH_CHECK_ENDPOINT = waveConfig.Watch.HealthcheckEndpoint;
 const GO_APP_STARTUP_TIMEOUT_IN_MS = 10_000; // 10s
+const PORT = 8080;
 
 let goProcess: ChildProcess | null = null;
-let proxy: RequestHandler;
+
+async function waitForGoApp(url: string, timeout: number): Promise<void> {
+	const startTime = Date.now();
+	return new Promise((resolve, reject) => {
+		const attempt = () => {
+			http.get(url, (res) => {
+				if (
+					res.statusCode &&
+					res.statusCode >= 200 &&
+					res.statusCode < 400
+				) {
+					resolve();
+				} else {
+					scheduleNextAttempt();
+				}
+			}).on("error", scheduleNextAttempt);
+		};
+
+		const scheduleNextAttempt = (err?: Error) => {
+			if (Date.now() - startTime > timeout) {
+				return reject(err || new Error("Health check timed out."));
+			}
+			setTimeout(attempt, 50);
+		};
+
+		attempt();
+	});
+}
 
 async function init() {
 	try {
@@ -25,63 +48,39 @@ async function init() {
 			"[Node Proxy]: Cold start detected. Starting Go process...",
 		);
 
-		const port = await getPort({ port: [8080, 8081, 8082, 8083, 8084] });
-
 		goProcess = spawn(GO_APP_LOCATION, [], {
-			env: {
-				...process.env,
-				PORT: port.toString(),
-			},
-			stdio: ["pipe", "pipe", "pipe"],
+			env: { ...process.env, PORT: PORT.toString() },
+			stdio: "pipe",
 		});
 
-		goProcess.stdout?.on("data", (data: Buffer) => {
-			console.log(`[Go STDOUT]: ${data.toString().trim()}`);
-		});
-		goProcess.stderr?.on("data", (data: Buffer) => {
-			console.error(`[Go STDERR]: ${data.toString().trim()}`);
-		});
+		goProcess.stdout?.on("data", (data) =>
+			console.log(`[Go]: ${data.toString().trim()}`),
+		);
+		goProcess.stderr?.on("data", (data) =>
+			console.error(`[Go ERR]: ${data.toString().trim()}`),
+		);
 
-		goProcess.on("error", (err: Error) => {
-			console.error("[Node Proxy]: Failed to start Go process:", err);
-			goProcess = null;
-		});
-
-		goProcess.on("exit", (code: number | null, signal: string | null) => {
+		goProcess.on("exit", (code, signal) => {
 			console.log(
-				`[Node Proxy]: Go process exited with code ${code} and signal ${signal}.`,
+				`[Node Proxy]: Go process exited with code ${code}, signal ${signal}.`,
 			);
-			goProcess = null;
+			goProcess = null; // Mark as dead
 		});
 
-		const healthUrl = `http://localhost:${port}${GO_APP_HEALTH_CHECK_ENDPOINT}`;
-		await waitOn({
-			resources: [healthUrl],
-			timeout: GO_APP_STARTUP_TIMEOUT_IN_MS,
-			interval: 20,
-			simultaneous: 1,
-			validateStatus: (status: number) => status >= 200 && status < 400,
-		});
-
-		proxy = createProxyMiddleware({
-			target: `http://localhost:${port}`,
-			changeOrigin: true,
-			ws: true,
-		});
+		const healthUrl = `http://localhost:${PORT}${GO_APP_HEALTH_CHECK_ENDPOINT}`;
+		await waitForGoApp(healthUrl, GO_APP_STARTUP_TIMEOUT_IN_MS);
 
 		const startupTime = performance.now() - startTime;
 		console.log(
-			`[Node Proxy]: Go app and proxy are ready in ${startupTime.toFixed(2)}ms.`,
+			`[Node Proxy]: Go app is ready in ${startupTime.toFixed(2)}ms.`,
 		);
 	} catch (error) {
 		console.error(
 			"[Node Proxy]: Fatal error during initialization:",
 			error,
 		);
-		if (goProcess) {
-			goProcess.kill();
-			goProcess = null;
-		}
+		goProcess?.kill();
+		goProcess = null;
 		throw error;
 	}
 }
@@ -94,35 +93,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 		await startupPromise;
 
 		if (!goProcess || goProcess.killed) {
-			res.status(503).json({
-				error: "Service Unavailable",
-				message: "The backend service is not running.",
-			});
+			res.status(503).send(
+				"Service Unavailable: The backend service is not running.",
+			);
 			return;
 		}
 
-		return new Promise<void>((resolve, reject) => {
-			proxy(req as any, res as any, (result) => {
-				if (result instanceof Error) {
-					return reject(result);
-				}
-				resolve();
-			});
+		const proxyReq = http.request(
+			{
+				hostname: "localhost",
+				port: PORT,
+				path: req.url,
+				method: req.method,
+				headers: req.headers,
+			},
+			(proxyRes) => {
+				res.writeHead(proxyRes.statusCode ?? 500, proxyRes.headers);
+				proxyRes.pipe(res, { end: true });
+			},
+		);
+
+		proxyReq.on("error", (err) => {
+			console.error("[Node Proxy]: Error proxying request:", err);
+			if (!res.headersSent) {
+				res.status(502).send("Bad Gateway");
+			}
+			res.end();
 		});
+
+		req.pipe(proxyReq, { end: true });
 	} catch (error) {
 		console.error("[Node Proxy]: Handler error:", error);
-		res.status(500).json({
-			error: "Internal Server Error",
-			message:
-				"Failed to proxy request due to an initialization failure.",
-		});
+		if (!res.headersSent) {
+			res.status(500).send(
+				"Internal Server Error: Initialization failed.",
+			);
+		}
 	}
 }
 
 process.on("SIGTERM", () => {
 	if (goProcess) {
 		console.log(
-			"[Node Proxy]: SIGTERM received. Shutting down Go process...",
+			"[Node Proxy]: SIGTERM received, shutting down Go process.",
 		);
 		goProcess.kill("SIGTERM");
 	}
