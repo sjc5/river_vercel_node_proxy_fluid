@@ -1,15 +1,12 @@
-// test-local.ts
 import { createServer } from "http";
 import handler from "./api/proxy.ts";
 
 const PORT = 3000;
 
 const server = createServer(async (req, res) => {
-	// Mock VercelRequest and VercelResponse
 	const vercelReq = req as any;
 	const vercelRes = res as any;
 
-	// Add missing Vercel response methods
 	vercelRes.status = (code: number) => {
 		res.statusCode = code;
 		return vercelRes;
