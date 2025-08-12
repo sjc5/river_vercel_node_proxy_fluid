@@ -1,16 +1,17 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { ChildProcess, spawn } from "child_process";
 import getPort from "get-port";
 import {
 	createProxyMiddleware,
 	type RequestHandler,
 } from "http-proxy-middleware";
-import { join } from "path";
+import { ChildProcess, spawn } from "node:child_process";
+import { join } from "node:path";
 import waitOn from "wait-on";
+import waveConfig from "../app/wave.config.json" with { type: "json" };
 
-const GO_APP_LOCATION = join(process.cwd(), "./app/__dist/main");
+const GO_APP_LOCATION = join(process.cwd(), waveConfig.Core.DistDir, "main");
+const GO_APP_HEALTH_CHECK_ENDPOINT = waveConfig.Watch.HealthcheckEndpoint;
 const GO_APP_STARTUP_TIMEOUT_IN_MS = 10_000; // 10s
-const GO_APP_HEALTH_CHECK_ENDPOINT = "/healthz";
 
 let goProcess: ChildProcess | null = null;
 let goPort: number | null = null;

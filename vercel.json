@@ -5,7 +5,7 @@
 	"outputDirectory": "app/__dist/static/assets/public",
 	"functions": {
 		"api/proxy.ts": {
-			"includeFiles": "app/__dist/main"
+			"includeFiles": "app/{__dist/main,wave.config.json}"
 		}
 	},
 	"rewrites": [
