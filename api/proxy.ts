@@ -22,7 +22,7 @@ let startPromise: Promise<number> | null = null;
 
 const requestTimings = new WeakMap<any, number>();
 
-await startGoApp();
+const PORT = await startGoApp();
 
 let proxyMiddleware: RequestHandler | null = null;
 
@@ -30,11 +30,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 	requestTimings.set(req, performance.now());
 
 	try {
-		const port = await startGoApp();
-
-		if (!proxyMiddleware || goPort !== port) {
+		if (!proxyMiddleware || goPort !== PORT) {
 			proxyMiddleware = createProxyMiddleware({
-				target: `http://localhost:${port}`,
+				target: `http://localhost:${PORT}`,
 				changeOrigin: true,
 				ws: true,
 				on: {
