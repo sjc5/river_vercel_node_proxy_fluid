@@ -35,29 +35,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 				target: `http://localhost:${PORT}`,
 				changeOrigin: true,
 				ws: true,
-				on: {
-					proxyRes: (proxyRes, req) => {
-						const startTime = requestTimings.get(req);
-						if (startTime) {
-							const duration = performance.now() - startTime;
-							console.log(
-								`[Node proxy]: ${req.method} ${req.url} - ${proxyRes.statusCode} in ${duration.toFixed(2)}ms`,
-							);
-							requestTimings.delete(req);
-						}
-					},
-					error: (err, req) => {
-						const startTime = requestTimings.get(req);
-						if (startTime) {
-							const duration = performance.now() - startTime;
-							console.error(
-								`[Node proxy]: ${req.method} ${req.url} - error after ${duration.toFixed(2)}ms:`,
-								err.message,
-							);
-							requestTimings.delete(req);
-						}
-					},
-				},
 			});
 		}
 
