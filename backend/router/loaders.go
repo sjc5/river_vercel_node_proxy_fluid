@@ -29,5 +29,5 @@ type RootData struct {
 
 // Example loader
 var _ = NewLoader("/_index", func(c *LoaderCtx) (*RootData, error) {
-	return &RootData{Message: "Hello from a River loader!"}, nil
+	return &RootData{Message: "Hello from a River loader"}, nil
 })
