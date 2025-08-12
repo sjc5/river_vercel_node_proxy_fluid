@@ -22,12 +22,7 @@ let startPromise: Promise<number> | null = null;
 
 const requestTimings = new WeakMap<any, number>();
 
-try {
-	await startGoApp();
-} catch (error) {
-	console.error("Failed to start Go app:", error);
-	process.exit(1);
-}
+await startGoApp();
 
 let proxyMiddleware: RequestHandler | null = null;
 
@@ -136,7 +131,7 @@ async function startGoApp(): Promise<number> {
 			await waitOn({
 				resources: [healthUrl],
 				timeout: GO_APP_STARTUP_TIMEOUT_IN_MS,
-				interval: 50,
+				interval: 10,
 				simultaneous: 1,
 				validateStatus: (status: number) =>
 					status >= 200 && status < 400,
