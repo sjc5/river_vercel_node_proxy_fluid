@@ -8,20 +8,84 @@ import {
 import { join } from "path";
 import waitOn from "wait-on";
 
-if (process.env.NODE_ENV === "production") {
-	startGoApp().catch(console.error);
-}
+const GO_APP_LOCATION = join(process.cwd(), "./app/__dist/main");
+const GO_APP_STARTUP_TIMEOUT_IN_MS = 10_000; // 10s
+const GO_APP_HEALTH_CHECK_ENDPOINT = "/healthz";
 
 let goProcess: ChildProcess | null = null;
 let goPort: number | null = null;
 let isStarting = false;
 let startPromise: Promise<number> | null = null;
 
-const GO_APP_LOCATION = join(process.cwd(), "./app/__dist/main");
-const GO_APP_STARTUP_TIMEOUT_IN_MS = 10_000; // 10s
-const GO_APP_HEALTH_CHECK_ENDPOINT = "/healthz";
-
 const requestTimings = new WeakMap<any, number>();
+
+if (process.env.NODE_ENV === "production") {
+	startGoApp().catch(console.error);
+}
+
+let proxyMiddleware: RequestHandler | null = null;
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+	requestTimings.set(req, performance.now());
+
+	try {
+		const port = await startGoApp();
+
+		if (!proxyMiddleware || goPort !== port) {
+			proxyMiddleware = createProxyMiddleware({
+				target: `http://localhost:${port}`,
+				changeOrigin: true,
+				ws: true,
+				on: {
+					proxyRes: (proxyRes, req) => {
+						const startTime = requestTimings.get(req);
+						if (startTime) {
+							const duration = performance.now() - startTime;
+							console.log(
+								`[Node proxy]: ${req.method} ${req.url} - ${proxyRes.statusCode} in ${duration.toFixed(2)}ms`,
+							);
+							requestTimings.delete(req);
+						}
+					},
+					error: (err, req) => {
+						const startTime = requestTimings.get(req);
+						if (startTime) {
+							const duration = performance.now() - startTime;
+							console.error(
+								`[Node proxy]: ${req.method} ${req.url} - error after ${duration.toFixed(2)}ms:`,
+								err.message,
+							);
+							requestTimings.delete(req);
+						}
+					},
+				},
+			});
+		}
+
+		return new Promise<void>((resolve, reject) => {
+			proxyMiddleware!(req as any, res as any, (err?: any) => {
+				if (err) {
+					reject(err);
+				} else {
+					resolve();
+				}
+			});
+		});
+	} catch (error) {
+		console.error("Handler error:", error);
+		res.status(500).json({
+			error: "Internal Server Error",
+			message: error instanceof Error ? error.message : "Unknown error",
+		});
+	}
+}
+
+process.on("SIGTERM", () => {
+	if (goProcess) {
+		console.log("Shutting down Go app...");
+		goProcess.kill("SIGTERM");
+	}
+});
 
 async function startGoApp(): Promise<number> {
 	if (isStarting && startPromise) {
@@ -92,67 +156,3 @@ async function startGoApp(): Promise<number> {
 
 	return startPromise;
 }
-
-let proxyMiddleware: RequestHandler | null = null;
-
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-	requestTimings.set(req, performance.now());
-
-	try {
-		const port = await startGoApp();
-
-		if (!proxyMiddleware || goPort !== port) {
-			proxyMiddleware = createProxyMiddleware({
-				target: `http://localhost:${port}`,
-				changeOrigin: true,
-				ws: true,
-				on: {
-					proxyRes: (proxyRes, req) => {
-						const startTime = requestTimings.get(req);
-						if (startTime) {
-							const duration = performance.now() - startTime;
-							console.log(
-								`[Node proxy]: ${req.method} ${req.url} - ${proxyRes.statusCode} in ${duration.toFixed(2)}ms`,
-							);
-							requestTimings.delete(req);
-						}
-					},
-					error: (err, req) => {
-						const startTime = requestTimings.get(req);
-						if (startTime) {
-							const duration = performance.now() - startTime;
-							console.error(
-								`[Node proxy]: ${req.method} ${req.url} - error after ${duration.toFixed(2)}ms:`,
-								err.message,
-							);
-							requestTimings.delete(req);
-						}
-					},
-				},
-			});
-		}
-
-		return new Promise<void>((resolve, reject) => {
-			proxyMiddleware!(req as any, res as any, (err?: any) => {
-				if (err) {
-					reject(err);
-				} else {
-					resolve();
-				}
-			});
-		});
-	} catch (error) {
-		console.error("Handler error:", error);
-		res.status(500).json({
-			error: "Internal Server Error",
-			message: error instanceof Error ? error.message : "Unknown error",
-		});
-	}
-}
-
-process.on("SIGTERM", () => {
-	if (goProcess) {
-		console.log("Shutting down Go app...");
-		goProcess.kill("SIGTERM");
-	}
-});
