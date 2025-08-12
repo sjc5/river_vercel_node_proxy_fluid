@@ -8,6 +8,10 @@ import {
 import { join } from "path";
 import waitOn from "wait-on";
 
+if (process.env.NODE_ENV === "production") {
+	startGoApp().catch(console.error);
+}
+
 let goProcess: ChildProcess | null = null;
 let goPort: number | null = null;
 let isStarting = false;
